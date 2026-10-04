@@ -10,7 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-# A burst of uploads results in a single deploy of the latest commit.
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -20,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # full history: build uses commit dates to sort photos without a date in the filename
 
       - uses: actions/setup-node@v5
         with:
@@ -29,13 +26,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-
-      - name: Restore resized images
-        uses: actions/cache@v4
-        with:
-          path: .cache
-          key: img-${{ hashFiles('photos/**') }}
-          restore-keys: img-
 
       - run: npm run build
 

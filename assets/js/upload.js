@@ -1,97 +1,104 @@
-// Phone upload: resizes photos in the browser (which strips all EXIF, including GPS),
-// then commits them to photos/ in a single commit via the GitHub Git Data API.
-// Pushing to main triggers the deploy workflow.
+// Phone upload: makes the thumb, md and full WebP sizes in the browser (re-encoding strips
+// all EXIF, including GPS), then sends them to the Worker in worker/, which stores them in R2
+// and adds the photo to photos.json. Photos are live as soon as the upload finishes.
 
-const REPO = 'RenRMT/pics_gallery';
-const BRANCH = 'main';
-const MAX_EDGE = 2560;
-const QUALITY = 0.88;
+const API = 'https://pics-upload.late-disk-1f3e.workers.dev';
+const KEY_NAME = 'upload_key';
 
-const API = `https://api.github.com/repos/${REPO}`;
-const TOKEN_KEY = 'gh_token';
+// Same sizes and qualities scripts/build.mjs used, largest first: each is drawn from the previous one.
+const VARIANTS = [
+  ['full', 2560, 2560, 0.85],
+  ['md', 1600, 1600, 0.82],
+  ['thumb', 960, 600, 0.78],
+];
 
 const $ = (sel) => document.querySelector(sel);
-const tokenInput = $('#token');
-const tokenStatus = $('#token-status');
+const keyInput = $('#key');
+const keyStatus = $('#key-status');
 const uploadStatus = $('#upload-status');
 const filesInput = $('#files');
 const previews = $('#previews');
 const uploadBtn = $('#upload');
 const clearBtn = $('#clear');
 
-let selected = []; // [{ file, li, badge }]
+let selected = []; // [{ file, url, li, badge, prepared? }]
 
 const storage = {
-  get: () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
-  set: (v) => { try { localStorage.setItem(TOKEN_KEY, v); } catch {} },
-  clear: () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} },
+  get: () => { try { return localStorage.getItem(KEY_NAME); } catch { return null; } },
+  set: (v) => { try { localStorage.setItem(KEY_NAME, v); } catch {} },
+  clear: () => { try { localStorage.removeItem(KEY_NAME); } catch {} },
 };
+
+// The old GitHub-based uploader kept a repo token here; don't leave it on the device.
+try { localStorage.removeItem('gh_token'); } catch {}
 
 function setStatus(el, text, isError = false) {
   el.textContent = text;
   el.classList.toggle('error', isError);
 }
 
-async function gh(path, { method = 'GET', body } = {}) {
+async function api(path, { method = 'GET', body, type } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${storage.get()}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(body && { 'Content-Type': 'application/json' }),
+      ...(type && { 'Content-Type': type }),
     },
-    body: body && JSON.stringify(body),
+    body,
   });
   if (!res.ok) {
-    const msg = await res.json().then((j) => j.message, () => res.statusText);
-    throw new Error(`GitHub ${res.status}: ${msg}`);
+    const msg = await res.text().catch(() => '') || res.statusText;
+    throw new Error(`${res.status}: ${msg}`);
   }
-  return res.json();
+  return res;
 }
 
-// --- token ---------------------------------------------------------------
+// --- key -----------------------------------------------------------------
 
-function showTokenState() {
+function showKeyState() {
   const has = !!storage.get();
-  tokenInput.value = '';
-  tokenInput.hidden = has;
-  $('label[for="token"]').textContent = has ? 'GitHub token saved' : 'GitHub token';
-  $('#save-token').hidden = has;
-  $('#forget-token').hidden = !has;
+  keyInput.value = '';
+  keyInput.hidden = has;
+  $('label[for="key"]').textContent = has ? 'Upload key saved' : 'Upload key';
+  $('#save-key').hidden = has;
+  $('#forget-key').hidden = !has;
   $('#upload-section').hidden = !has;
 }
 
-$('#save-token').addEventListener('click', async () => {
-  const value = tokenInput.value.trim();
+$('#save-key').addEventListener('click', async () => {
+  const value = keyInput.value.trim();
   if (!value) return;
   storage.set(value);
-  setStatus(tokenStatus, 'Checking…');
+  setStatus(keyStatus, 'Checking…');
   try {
-    await gh(`/branches/${BRANCH}`);
-    setStatus(tokenStatus, `Connected to ${REPO}.`);
-    showTokenState();
+    await api('/api/ping');
+    setStatus(keyStatus, 'Key accepted.');
+    showKeyState();
   } catch (err) {
     storage.clear();
-    setStatus(tokenStatus, `Token rejected — ${err.message}`, true);
+    setStatus(keyStatus, `Key rejected — ${err.message}`, true);
   }
 });
 
-$('#forget-token').addEventListener('click', () => {
+$('#forget-key').addEventListener('click', () => {
   storage.clear();
-  setStatus(tokenStatus, 'Token removed from this device.');
-  showTokenState();
+  setStatus(keyStatus, 'Key removed from this device.');
+  showKeyState();
 });
 
 // --- selection -----------------------------------------------------------
+
+function updateButtons() {
+  uploadBtn.disabled = !selected.length;
+  clearBtn.hidden = !selected.length;
+}
 
 function clearSelection() {
   for (const s of selected) URL.revokeObjectURL(s.url);
   selected = [];
   previews.innerHTML = '';
   filesInput.value = '';
-  uploadBtn.disabled = true;
-  clearBtn.hidden = true;
+  updateButtons();
 }
 
 filesInput.addEventListener('change', () => {
@@ -106,11 +113,10 @@ filesInput.addEventListener('change', () => {
     badge.className = 'badge';
     li.append(img, badge);
     previews.append(li);
-    selected.push({ file, url, badge });
+    selected.push({ file, url, li, badge });
   }
   filesInput.value = '';
-  uploadBtn.disabled = !selected.length;
-  clearBtn.hidden = !selected.length;
+  updateButtons();
   setStatus(uploadStatus, selected.length ? `${selected.length} photo(s) ready.` : '');
 });
 
@@ -123,9 +129,9 @@ clearBtn.addEventListener('click', () => {
 
 const pad = (n) => String(n).padStart(2, '0');
 
-// Name files by capture time when the original name has it (e.g. PXL_20261004_101530123.jpg),
-// otherwise by the file's modified time. The build sorts on this.
-function fileName(file) {
+// Name photos by capture time when the original name has it (e.g. PXL_20261004_101530123.jpg),
+// otherwise by the file's modified time. The gallery sorts on this.
+function fileStem(file) {
   const m = file.name.match(/(20\d{2})(\d{2})(\d{2})[_-]?(\d{2})(\d{2})(\d{2})/);
   let stamp;
   if (m) {
@@ -135,78 +141,118 @@ function fileName(file) {
     stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   }
   const rand = crypto.getRandomValues(new Uint16Array(1))[0].toString(16).padStart(4, '0');
-  return `${stamp}-${rand}.jpg`;
+  return `${stamp}-${rand}`;
 }
 
-async function resize(file) {
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
+// Capture time in ms from a stem like 20261004-110313-271e, parsed as UTC like the old build did.
+function timeFromStem(stem) {
+  const m = stem.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+function drawInside(source, sw, sh, maxW, maxH) {
+  const scale = Math.min(1, maxW / sw, maxH / sh);
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode image'))), 'image/jpeg', QUALITY));
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
 
-function toBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+function encodeWebp(canvas, quality) {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => {
+      if (!b) reject(new Error('Could not encode image'));
+      else if (b.type !== 'image/webp') reject(new Error('This browser cannot encode WebP. Use a Chromium-based browser.'));
+      else resolve(b);
+    }, 'image/webp', quality));
+}
+
+async function makeVariants(file) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const blobs = {};
+  let source = bitmap;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  let full;
+  try {
+    for (const [size, maxW, maxH, quality] of VARIANTS) {
+      const canvas = drawInside(source, w, h, maxW, maxH);
+      blobs[size] = await encodeWebp(canvas, quality);
+      if (size === 'full') full = { w: canvas.width, h: canvas.height };
+      source = canvas;
+      w = canvas.width;
+      h = canvas.height;
+    }
+  } finally {
+    bitmap.close();
+  }
+  return { blobs, ...full };
+}
+
+// Made once per photo, so a retry re-sends the same id and bytes instead of leaving orphans.
+async function prepare(s) {
+  if (s.prepared) return s.prepared;
+  const { blobs, w, h } = await makeVariants(s.file);
+  const digest = await crypto.subtle.digest('SHA-256', await blobs.full.arrayBuffer());
+  const hash = [...new Uint8Array(digest).slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const stem = fileStem(s.file);
+  s.prepared = { id: `${stem}-${hash}`, blobs, w, h, t: timeFromStem(stem) };
+  return s.prepared;
 }
 
 // --- upload --------------------------------------------------------------
+
+async function uploadOne(s) {
+  const p = await prepare(s);
+  await Promise.all(Object.keys(p.blobs).map((size) =>
+    api(`/api/img/${size}/${p.id}.webp`, { method: 'PUT', body: p.blobs[size], type: 'image/webp' })));
+  await api('/api/photos', {
+    method: 'POST',
+    body: JSON.stringify({ id: p.id, w: p.w, h: p.h, t: p.t }),
+    type: 'application/json',
+  });
+}
 
 uploadBtn.addEventListener('click', async () => {
   uploadBtn.disabled = true;
   clearBtn.hidden = true;
   filesInput.disabled = true;
+  const done = [];
+  let lastError;
   try {
-    const tree = [];
     for (const [i, s] of selected.entries()) {
-      setStatus(uploadStatus, `Processing ${i + 1} of ${selected.length}…`);
+      setStatus(uploadStatus, `Uploading ${i + 1} of ${selected.length}…`);
       s.badge.textContent = '…';
-      const blob = await resize(s.file);
-      const { sha } = await gh('/git/blobs', {
-        method: 'POST',
-        body: { content: await toBase64(blob), encoding: 'base64' },
-      });
-      tree.push({ path: `photos/${fileName(s.file)}`, mode: '100644', type: 'blob', sha });
-      s.badge.textContent = '✓';
+      try {
+        await uploadOne(s);
+        s.badge.textContent = '✓';
+        done.push(s);
+      } catch (err) {
+        console.error(err);
+        s.badge.textContent = '!';
+        lastError = err;
+      }
     }
-
-    setStatus(uploadStatus, 'Committing…');
-    const ref = await gh(`/git/ref/heads/${BRANCH}`);
-    const parent = await gh(`/git/commits/${ref.object.sha}`);
-    const newTree = await gh('/git/trees', { method: 'POST', body: { base_tree: parent.tree.sha, tree } });
-    const commit = await gh('/git/commits', {
-      method: 'POST',
-      body: {
-        message: `Add ${tree.length} photo${tree.length > 1 ? 's' : ''}`,
-        tree: newTree.sha,
-        parents: [ref.object.sha],
-      },
-    });
-    await gh(`/git/refs/heads/${BRANCH}`, { method: 'PATCH', body: { sha: commit.sha } });
-
-    clearSelection();
-    setStatus(uploadStatus, `Uploaded ${tree.length} photo(s). The site updates in about 1–2 minutes.`);
-  } catch (err) {
-    console.error(err);
-    setStatus(uploadStatus, `Upload failed — ${err.message}`, true);
-    uploadBtn.disabled = !selected.length;
-    clearBtn.hidden = !selected.length;
   } finally {
+    // Successful photos leave the list; failed ones keep their preview for a retry.
+    for (const s of done) {
+      URL.revokeObjectURL(s.url);
+      s.li.remove();
+    }
+    selected = selected.filter((s) => !done.includes(s));
     filesInput.disabled = false;
+    updateButtons();
+  }
+
+  if (!lastError) {
+    setStatus(uploadStatus, `Uploaded ${done.length} photo(s). They're live now.`);
+  } else {
+    const prefix = done.length ? `Uploaded ${done.length}, ` : '';
+    setStatus(uploadStatus, `${prefix}${selected.length} failed — ${lastError.message}. Tap Upload to retry.`, true);
   }
 });
 
-showTokenState();
+showKeyState();

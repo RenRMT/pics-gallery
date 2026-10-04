@@ -28,15 +28,15 @@
   <main class="upload">
     <h1>Upload</h1>
 
-    <section id="token-section">
-      <label for="token">GitHub token</label>
-      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+    <section id="key-section">
+      <label for="key">Upload key</label>
+      <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="64 hex characters">
       <div class="row">
-        <button id="save-token" class="btn secondary" type="button">Save token</button>
-        <button id="forget-token" class="btn secondary" type="button" hidden>Forget token</button>
+        <button id="save-key" class="btn secondary" type="button">Save key</button>
+        <button id="forget-key" class="btn secondary" type="button" hidden>Forget key</button>
       </div>
-      <p class="hint">Fine-grained token with <strong>Contents: read and write</strong> on this repository only. Stored on this device only.</p>
-      <p id="token-status" class="status" role="status"></p>
+      <p class="hint">The <code>UPLOAD_KEY</code> secret set on the upload Worker. Stored on this device only.</p>
+      <p id="key-status" class="status" role="status"></p>
     </section>
 
     <section id="upload-section" hidden>
@@ -49,7 +49,7 @@
         <button id="upload" class="btn" type="button" disabled>Upload</button>
         <button id="clear" class="btn secondary" type="button" hidden>Clear</button>
       </div>
-      <p class="hint">Photos are resized to 2560&nbsp;px and all metadata (including GPS location) is removed on this device before upload.</p>
+      <p class="hint">Photos are converted to WebP at up to 2560&nbsp;px and all metadata (including GPS location) is removed on this device before upload.</p>
       <p id="upload-status" class="status" role="status"></p>
     </section>
   </main>
