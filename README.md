@@ -59,7 +59,7 @@ npx wrangler deploy   # publish to pics-upload.late-disk-1f3e.workers.dev
 Pushing to `main` deploys the pages only. Changes in `worker/` go live when you run `npx wrangler deploy`.
 
 ## One-time setup
-1. **Repo:** create `RenRMT/pics_gallery` (must be public for free Pages) and push this folder to `main`.
+1. **Repo:** create `RenRMT/pics-gallery` (must be public for free Pages) and push this folder to `main`.
 2. **Pages:** go to Settings → Pages → Source: **GitHub Actions**.
 3. **DNS:** at your domain's DNS provider, add `CNAME  pics  →  renrmt.github.io`.
 4. **Custom domain:** in Settings → Pages, set the domain to `pics.<yourdomain>`. Tick **Enforce HTTPS** once the certificate is issued (can take up to ~1 h).
