@@ -1,0 +1,16 @@
+{
+  "name": "pics-gallery",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "npx --yes serve _site",
+    "dev": "node scripts/build.mjs && npx --yes serve _site"
+  },
+  "dependencies": {
+    "sharp": "^0.34.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
