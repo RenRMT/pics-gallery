@@ -1,30 +1,79 @@
 # pics
 
-Minimal photo gallery: a random-photo page, a gallery with a full-screen viewer, and a light/dark toggle. It's a static site on GitHub Pages, with photos stored in `photos/`.
+Minimal photo gallery: a random-photo page, a gallery with a full-screen viewer, and a light/dark toggle. The pages are a static site on GitHub Pages; the photos live in a Cloudflare R2 bucket and are served by a small Worker.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  phone["📱 Phone<br/>upload.html<br/>makes 3 WebP sizes"] -- "PUT images, POST entry<br/>(upload key)" --> worker["Cloudflare Worker<br/>pics-upload.late-disk-1f3e.workers.dev"]
+  worker <-- "read / write" --> r2[("R2 bucket<br/>pics")]
+  pages["GitHub Pages<br/>HTML, CSS, JS"] -- "pages" --> visitor["🌐 Visitor's browser"]
+  worker -- "photos.json + images" --> visitor
+```
+
+The top row is the upload path. Visitors get the pages from GitHub Pages and the photos from the Worker, which reads them from R2. Only requests carrying the upload key can write.
 
 ## How it works
-- `photos/` holds the source images.
-- `npm run build` (sharp) creates WebP variants with metadata removed (`thumb` 960×600, `md` 1600, `full` 2560) and `photos.json` (newest first). Output goes to `_site/`.
-- Each push to `main` runs `.github/workflows/deploy.yml`, which builds and deploys to Pages.
-- `upload.html` (not linked in the nav) uploads from your phone. It resizes each photo to 2560 px in the browser, which strips EXIF/GPS, and commits all selected photos in one commit through the GitHub API.
+- `upload.html` (not linked in the nav) uploads from your phone. It makes three WebP sizes in the browser (`thumb` 960×600, `md` 1600, `full` 2560), which strips EXIF/GPS, and sends them to the Worker with an upload key.
+- The Worker (`worker/`) checks the key and the files, writes them to the private R2 bucket `pics`, and adds the photo to `photos.json` (newest first). It rejects any WebP that still carries EXIF or XMP.
+- The gallery and random pages load `photos.json` and the images from the Worker (set as `BASE` in `assets/js/photos.js`). Photos are live as soon as the upload finishes.
+- `npm run build` copies the pages and assets to `_site/` and renders the icons. Each push to `main` runs `.github/workflows/deploy.yml`, which builds and deploys to Pages. Deploys only happen when code changes.
+
+### Bucket layout
+
+| Key | Contents | Cache-Control |
+| --- | --- | --- |
+| `img/thumb/<id>.webp` | Fits inside 960 × 600, quality 78 | `public, max-age=31536000, immutable` |
+| `img/md/<id>.webp` | Fits inside 1600 × 1600, quality 82 | same |
+| `img/full/<id>.webp` | Fits inside 2560 × 2560, quality 85 | same |
+| `photos.json` | `[{ id, w, h, t }]`, newest first | `no-cache` |
+
+An id is the capture timestamp, a random suffix and the first 8 hex characters of the full-size file's SHA-256, e.g. `20261004-110313-271e-3fa91c02`. An id never points to different bytes, which is what makes the one-year cache safe.
+
+### Worker API
+
+| Route | Key needed | What it does |
+| --- | --- | --- |
+| `GET /photos.json` | No | Serves the manifest |
+| `GET /img/{size}/{id}.webp` | No | Serves one image |
+| `GET /api/ping` | Yes | Checks the key (204 or 401) |
+| `PUT /api/img/{size}/{id}.webp` | Yes | Validates and stores one WebP |
+| `POST /api/photos` | Yes | Adds `{id, w, h, t}` to the manifest once all three sizes exist |
+| `DELETE /api/photos/{id}` | Yes | Removes the manifest entry and the three files |
 
 ## Local development
 ```sh
 npm install
-npm run dev                          # build + serve on http://localhost:3000
-PHOTOS_DIR=/path/to/test npm run dev # build from another folder
+npm run dev   # build + serve on http://localhost:3000, using the live photos from the Worker
 ```
 
+Worker:
+```sh
+cd worker
+npm install
+npx wrangler dev      # local Worker
+npx wrangler deploy   # publish to pics-upload.late-disk-1f3e.workers.dev
+```
+
+Pushing to `main` deploys the pages only. Changes in `worker/` go live when you run `npx wrangler deploy`.
+
 ## One-time setup
-1. **Repo:** create `RenRMT/pics_gallery` (must be public for free Pages) and push this folder to `main`. If you pick a different name, update `REPO` at the top of `assets/js/upload.js`.
+1. **Repo:** create `RenRMT/pics_gallery` (must be public for free Pages) and push this folder to `main`.
 2. **Pages:** go to Settings → Pages → Source: **GitHub Actions**.
 3. **DNS:** at your domain's DNS provider, add `CNAME  pics  →  renrmt.github.io`.
 4. **Custom domain:** in Settings → Pages, set the domain to `pics.<yourdomain>`. Tick **Enforce HTTPS** once the certificate is issued (can take up to ~1 h).
 5. **Prevent subdomain takeover:** in GitHub → Settings → Pages (account level), verify your domain by adding the TXT record it gives you.
-6. **Upload token:** go to GitHub → Settings → Developer settings → Fine-grained tokens → Generate. Use *Only select repositories* → `pics_gallery`, with Permissions → **Contents: Read and write**. Choose an expiry you're comfortable renewing.
-7. **Phone:** open `https://pics.<yourdomain>/upload.html` in Vanadium and paste the token. Optionally, use ⋮ → *Add to Home screen* so it opens like an app.
+6. **Bucket:** in Cloudflare → R2, create the bucket `pics` (keep it private) and seed it with an empty manifest:
+   ```sh
+   echo [] > photos.json
+   npx wrangler r2 object put pics/photos.json --file photos.json --content-type application/json --cache-control no-cache --remote
+   ```
+7. **Worker:** in `worker/`, run `npm install` and `npx wrangler login`. Then run `npx wrangler secret put UPLOAD_KEY` with a key from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`, and finally `npx wrangler deploy`. Allowed page origins are in `ALLOWED_ORIGINS` in `worker/wrangler.jsonc`.
+8. **Phone:** open `https://pics.<yourdomain>/upload.html` in Vanadium (or another Chromium browser; it needs WebP encoding) and paste the upload key. Optionally, use ⋮ → *Add to Home screen* so it opens like an app.
 
 ## Adding and removing photos
-- **Add:** use the upload page. The site updates ~1–2 min after the commit.
-- **Remove:** delete the file from `photos/` on github.com. The next deploy removes it from the site.
-- ⚠️ **Avoid uploading through github.com directly.** That commits the original file, including GPS location, to the public repo history. The deployed images are stripped either way, but the original stays in git.
+- **Add:** use the upload page. Failed photos keep their preview; tap Upload again to retry just those.
+- **Remove:** `curl -X DELETE -H "Authorization: Bearer $UPLOAD_KEY" https://pics-upload.late-disk-1f3e.workers.dev/api/photos/<id>`. The id is in `photos.json` and in the image URLs.
+- **Rotate the key:** run `npx wrangler secret put UPLOAD_KEY` with a new value and paste it on your phone. The old key stops working immediately.
+- Everything in the `pics` bucket is public through the Worker. Never put originals or anything private there.

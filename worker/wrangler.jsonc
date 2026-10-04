@@ -1,0 +1,16 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "pics-upload",
+	"main": "src/index.js",
+	"compatibility_date": "2026-10-01",
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "pics"
+		}
+	],
+	"vars": {
+		"ALLOWED_ORIGINS": "https://renrmt.github.io,http://localhost:3000"
+	}
+	// UPLOAD_KEY is a secret: set it with `npx wrangler secret put UPLOAD_KEY`.
+}
