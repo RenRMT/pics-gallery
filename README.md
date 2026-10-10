@@ -61,16 +61,16 @@ Pushing to `main` deploys the pages only. Changes in `worker/` go live when you 
 ## One-time setup
 1. **Repo:** create `RenRMT/pics-gallery` (must be public for free Pages) and push this folder to `main`.
 2. **Pages:** go to Settings → Pages → Source: **GitHub Actions**.
-3. **DNS:** at your domain's DNS provider, add `CNAME  pics  →  renrmt.github.io`.
-4. **Custom domain:** in Settings → Pages, set the domain to `pics.<yourdomain>`. Tick **Enforce HTTPS** once the certificate is issued (can take up to ~1 h).
-5. **Prevent subdomain takeover:** in GitHub → Settings → Pages (account level), verify your domain by adding the TXT record it gives you.
+3. **Domain:** nothing to set here. As a project site, the gallery is served under the user site's custom domain at `https://rendata.nl/pics-gallery/` (domain, DNS and HTTPS are configured in `RenRMT.github.io`).
+4. **Origins:** `ALLOWED_ORIGINS` in `worker/wrangler.jsonc` must list the origin the gallery is served from (`https://rendata.nl`). If the domain ever changes, update it and run `npx wrangler deploy`, or the gallery can't load `photos.json`.
+5. *(Optional)* To give the gallery its own subdomain instead, add `CNAME  pics  →  renrmt.github.io` at the DNS provider, set `pics.rendata.nl` as the custom domain in this repo's Settings → Pages, and add `https://pics.rendata.nl` to `ALLOWED_ORIGINS`.
 6. **Bucket:** in Cloudflare → R2, create the bucket `pics` (keep it private) and seed it with an empty manifest:
    ```sh
    echo [] > photos.json
    npx wrangler r2 object put pics/photos.json --file photos.json --content-type application/json --cache-control no-cache --remote
    ```
 7. **Worker:** in `worker/`, run `npm install` and `npx wrangler login`. Then run `npx wrangler secret put UPLOAD_KEY` with a key from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`, and finally `npx wrangler deploy`. Allowed page origins are in `ALLOWED_ORIGINS` in `worker/wrangler.jsonc`.
-8. **Phone:** open `https://pics.<yourdomain>/upload.html` in Vanadium (or another Chromium browser; it needs WebP encoding) and paste the upload key. Optionally, use ⋮ → *Add to Home screen* so it opens like an app.
+8. **Phone:** open `https://rendata.nl/pics-gallery/upload.html` in Vanadium (or another Chromium browser; it needs WebP encoding) and paste the upload key. Optionally, use ⋮ → *Add to Home screen* so it opens like an app.
 
 ## Adding and removing photos
 - **Add:** use the upload page. Failed photos keep their preview; tap Upload again to retry just those.

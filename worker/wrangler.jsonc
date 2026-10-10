@@ -10,7 +10,7 @@
 		}
 	],
 	"vars": {
-		"ALLOWED_ORIGINS": "https://renrmt.github.io,http://localhost:3000,https://rendata.nl"
+		"ALLOWED_ORIGINS": "https://rendata.nl,http://localhost:3000"
 	}
 	// UPLOAD_KEY is a secret: set it with `npx wrangler secret put UPLOAD_KEY`.
 }
