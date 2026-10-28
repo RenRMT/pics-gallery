@@ -10,9 +10,10 @@ function current() {
 function sync() {
   const isDark = current() === 'dark';
   document.querySelectorAll('.theme-toggle').forEach((btn) => {
-    btn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.setAttribute('aria-pressed', String(isDark));
+    btn.querySelector('.label').textContent = isDark ? 'Dark' : 'Light';
   });
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark ? '#0a1b18' : '#f9f9f9');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark ? '#0F2723' : '#F9F9F9');
 }
 
 document.querySelectorAll('.theme-toggle').forEach((btn) => {
