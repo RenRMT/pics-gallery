@@ -2,6 +2,8 @@
 // all EXIF, including GPS), then sends them to the Worker in worker/, which stores them in R2
 // and adds the photo to photos.json. Photos are live as soon as the upload finishes.
 
+import { loadPhotos, src } from './photos.js';
+
 const API = 'https://pics-upload.late-disk-1f3e.workers.dev';
 const KEY_NAME = 'upload_key';
 
@@ -63,6 +65,7 @@ function showKeyState() {
   $('#save-key').hidden = has;
   $('#forget-key').hidden = !has;
   $('#upload-section').hidden = !has;
+  $('#manage-section').hidden = !has;
 }
 
 $('#save-key').addEventListener('click', async () => {
@@ -253,6 +256,109 @@ uploadBtn.addEventListener('click', async () => {
     const prefix = done.length ? `Uploaded ${done.length}, ` : '';
     setStatus(uploadStatus, `${prefix}${selected.length} failed — ${lastError.message}. Tap Upload to retry.`, true);
   }
+  if (done.length && !manageList.hidden) showPhotos();
+});
+
+// --- delete --------------------------------------------------------------
+
+const manageList = $('#manage');
+const manageStatus = $('#manage-status');
+const showBtn = $('#show-photos');
+const deleteBtn = $('#delete');
+const cancelBtn = $('#cancel-delete');
+
+const marked = new Map(); // id -> { li, btn, badge }
+let armed = false; // Delete asks for a second tap before it removes anything
+
+function updateDeleteButtons() {
+  armed = false;
+  deleteBtn.hidden = manageList.hidden;
+  deleteBtn.disabled = !marked.size;
+  deleteBtn.textContent = marked.size ? `Delete ${marked.size} photo(s)` : 'Delete';
+  cancelBtn.hidden = !marked.size;
+}
+
+function toggleMark(id, entry) {
+  const on = !marked.has(id);
+  if (on) marked.set(id, entry);
+  else marked.delete(id);
+  entry.btn.setAttribute('aria-pressed', String(on));
+  entry.badge.textContent = on ? '✕' : '';
+  updateDeleteButtons();
+}
+
+async function showPhotos() {
+  showBtn.disabled = true;
+  setStatus(manageStatus, 'Loading…');
+  try {
+    const photos = await loadPhotos();
+    marked.clear();
+    manageList.innerHTML = '';
+    for (const p of photos) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('aria-label', `Select photo ${p.id}`);
+      const img = document.createElement('img');
+      img.src = src(p.id, 'thumb');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      btn.append(img);
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      li.append(btn, badge);
+      const entry = { li, btn, badge };
+      btn.addEventListener('click', () => toggleMark(p.id, entry));
+      manageList.append(li);
+    }
+    manageList.hidden = false;
+    showBtn.textContent = 'Refresh';
+    setStatus(manageStatus, photos.length ? `${photos.length} photo(s) online.` : 'No photos yet.');
+  } catch (err) {
+    setStatus(manageStatus, `Could not load photos — ${err.message}`, true);
+  } finally {
+    showBtn.disabled = false;
+    updateDeleteButtons();
+  }
+}
+
+showBtn.addEventListener('click', showPhotos);
+
+cancelBtn.addEventListener('click', () => {
+  for (const [id, entry] of [...marked]) toggleMark(id, entry);
+  setStatus(manageStatus, '');
+});
+
+deleteBtn.addEventListener('click', async () => {
+  if (!armed) {
+    armed = true;
+    deleteBtn.textContent = `Tap again to delete ${marked.size}`;
+    return;
+  }
+  deleteBtn.disabled = true;
+  cancelBtn.hidden = true;
+  showBtn.disabled = true;
+  const total = marked.size;
+  let removed = 0;
+  let lastError;
+  for (const [id, entry] of [...marked]) {
+    setStatus(manageStatus, `Deleting ${removed + 1} of ${total}…`);
+    try {
+      await api(`/api/photos/${id}`, { method: 'DELETE' });
+      entry.li.remove();
+      marked.delete(id);
+      removed++;
+    } catch (err) {
+      console.error(err);
+      lastError = err;
+    }
+  }
+  showBtn.disabled = false;
+  updateDeleteButtons();
+  if (!lastError) setStatus(manageStatus, `Deleted ${removed} photo(s).`);
+  else setStatus(manageStatus, `Deleted ${removed}, ${marked.size} failed — ${lastError.message}. Tap Delete to retry.`, true);
 });
 
 showKeyState();

@@ -74,6 +74,6 @@ Pushing to `main` deploys the pages only. Changes in `worker/` go live when you 
 
 ## Adding and removing photos
 - **Add:** use the upload page. Failed photos keep their preview; tap Upload again to retry just those.
-- **Remove:** `curl -X DELETE -H "Authorization: Bearer $UPLOAD_KEY" https://pics-upload.late-disk-1f3e.workers.dev/api/photos/<id>`. The id is in `photos.json` and in the image URLs.
+- **Remove:** on the upload page, tap *Show uploaded photos*, select the photos, then tap *Delete* twice. Or from a shell: `curl -X DELETE -H "Authorization: Bearer $UPLOAD_KEY" https://pics-upload.late-disk-1f3e.workers.dev/api/photos/<id>`. The id is in `photos.json` and in the image URLs.
 - **Rotate the key:** run `npx wrangler secret put UPLOAD_KEY` with a new value and paste it on your phone. The old key stops working immediately.
 - Everything in the `pics` bucket is public through the Worker. Never put originals or anything private there.
