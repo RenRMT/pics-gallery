@@ -52,6 +52,20 @@
       <p class="hint">Photos are converted to WebP at up to 2560&nbsp;px and all metadata (including GPS location) is removed on this device before upload.</p>
       <p id="upload-status" class="status" role="status"></p>
     </section>
+
+    <section id="manage-section" hidden>
+      <h2>Remove photos</h2>
+      <div class="row">
+        <button id="show-photos" class="btn secondary" type="button">Show uploaded photos</button>
+      </div>
+      <ul class="previews manage" id="manage" hidden></ul>
+      <div class="row">
+        <button id="delete" class="btn danger" type="button" hidden disabled>Delete</button>
+        <button id="cancel-delete" class="btn secondary" type="button" hidden>Cancel</button>
+      </div>
+      <p class="hint">Tap photos to select them. Deleting removes them from the gallery and the bucket; it can't be undone.</p>
+      <p id="manage-status" class="status" role="status"></p>
+    </section>
   </main>
   <script type="module" src="assets/js/theme.js"></script>
   <script type="module" src="assets/js/upload.js"></script>
